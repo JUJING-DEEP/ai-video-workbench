@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 
@@ -202,3 +202,37 @@ async def create_project_asset(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return jsonable_encoder({"asset": asset})
+
+
+@router.post("/projects/{project_id}/upload")
+async def upload_project_asset(
+    project_id: int,
+    asset_type: str = Form(...),
+    file: UploadFile = File(...),
+    repository: VideoWorkbenchRepository = Depends(get_repository),
+):
+    normalized_type = asset_type.strip()
+    if normalized_type not in {"image", "keyframe", "video"}:
+        raise HTTPException(
+            status_code=400,
+            detail="asset_type must be one of: image, keyframe, video.",
+        )
+
+    try:
+        repository.get_project(project_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    filename = Path(file.filename or "upload").name
+    upload_dir = Path("data") / "uploads" / str(project_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    output_path = upload_dir / filename
+    output_path.write_bytes(await file.read())
+
+    return jsonable_encoder(
+        {
+            "name": filename,
+            "path": output_path.as_posix(),
+            "asset_type": normalized_type,
+        }
+    )

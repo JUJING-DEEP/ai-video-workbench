@@ -82,3 +82,20 @@ export function createProjectAsset(projectId, asset) {
     body: JSON.stringify(asset)
   })
 }
+
+export async function uploadProjectAsset(projectId, assetType, file) {
+  const body = new FormData()
+  body.append('asset_type', assetType)
+  body.append('file', file)
+
+  const response = await fetch(`${API_BASE}/api/video-workbench/projects/${projectId}/upload`, {
+    method: 'POST',
+    body
+  })
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response))
+  }
+
+  return response.json()
+}

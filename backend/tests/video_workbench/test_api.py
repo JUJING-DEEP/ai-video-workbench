@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -7,7 +9,8 @@ from app.video_workbench.repository import VideoWorkbenchRepository
 
 
 @pytest.fixture()
-def client(tmp_path):
+def client(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     repository = VideoWorkbenchRepository(
         db_path=tmp_path / "video-workbench.db",
         projects_root=tmp_path / "projects",
@@ -265,3 +268,41 @@ def test_create_project_asset_requires_path(client):
 
     assert response.status_code == 400
     assert "path" in response.json()["detail"].lower()
+
+
+def test_upload_project_asset_saves_file_and_returns_metadata(client):
+    project_id = client.post(
+        "/api/video-workbench/projects",
+        json={"title": "Upload Asset"},
+    ).json()["project"]["id"]
+
+    response = client.post(
+        f"/api/video-workbench/projects/{project_id}/upload",
+        data={"asset_type": "image"},
+        files={"file": ("shot-001.png", b"image-bytes", "image/png")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == {
+        "name": "shot-001.png",
+        "path": f"data/uploads/{project_id}/shot-001.png",
+        "asset_type": "image",
+    }
+    assert Path(payload["path"]).read_bytes() == b"image-bytes"
+
+
+def test_upload_project_asset_rejects_unknown_asset_type(client):
+    project_id = client.post(
+        "/api/video-workbench/projects",
+        json={"title": "Bad Upload Type"},
+    ).json()["project"]["id"]
+
+    response = client.post(
+        f"/api/video-workbench/projects/{project_id}/upload",
+        data={"asset_type": "audio"},
+        files={"file": ("voice.mp3", b"audio", "audio/mpeg")},
+    )
+
+    assert response.status_code == 400
+    assert "asset_type" in response.json()["detail"]

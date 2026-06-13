@@ -43,6 +43,36 @@
           <h2>素材库</h2>
         </div>
 
+        <section class="video-workbench__asset-upload" aria-label="上传素材">
+          <div class="video-workbench__field">
+            <label for="asset-library-upload-type">素材类型</label>
+            <select id="asset-library-upload-type" v-model="uploadAssetType">
+              <option value="image">image</option>
+              <option value="keyframe">keyframe</option>
+              <option value="video">video</option>
+            </select>
+          </div>
+          <div class="video-workbench__field">
+            <label for="asset-library-upload-file">本地文件</label>
+            <input
+              id="asset-library-upload-file"
+              type="file"
+              :accept="uploadAccept"
+              @change="handleSelectUploadFile"
+            />
+          </div>
+          <button
+            type="button"
+            data-testid="upload-library-asset"
+            :disabled="!selectedUploadFile || isUploadingAsset"
+            @click="handleUploadAsset"
+          >
+            {{ isUploadingAsset ? '上传中...' : 'Upload asset' }}
+          </button>
+        </section>
+
+        <p v-if="uploadMessage" class="video-workbench__upload-message">{{ uploadMessage }}</p>
+
         <div class="video-workbench__asset-groups">
           <section
             v-for="group in assetLibraryGroups"
@@ -181,12 +211,14 @@ import ShotTimeline from '../components/video-workbench/ShotTimeline.vue'
 import ValidationPanel from '../components/video-workbench/ValidationPanel.vue'
 import {
   bindShotAsset,
+  createProjectAsset,
   createProject,
   getProjectShots,
   importStoryboard,
   listProjectAssets,
   listProjects,
-  parseStoryboard
+  parseStoryboard,
+  uploadProjectAsset
 } from '../services/videoWorkbenchApi'
 
 const projectTitle = ref('')
@@ -204,6 +236,10 @@ const assetPreviews = ref({ image: null, keyframe: null, video: null })
 const isCreatingProject = ref(false)
 const isParsing = ref(false)
 const savingAssetType = ref('')
+const uploadAssetType = ref('image')
+const selectedUploadFile = ref(null)
+const isUploadingAsset = ref(false)
+const uploadMessage = ref('')
 
 const assetFields = [
   { type: 'image', label: '图片', placeholder: '/path/to/shot-001.png', accept: 'image/*' },
@@ -251,6 +287,10 @@ const assetLibraryGroups = computed(() => [
     assets: projectAssets.value.filter((asset) => asset.asset_type === 'video')
   }
 ])
+
+const uploadAccept = computed(() => {
+  return uploadAssetType.value === 'video' ? 'video/*' : 'image/*'
+})
 
 onMounted(() => {
   refreshProjects()
@@ -425,6 +465,42 @@ async function handleBindLibraryAsset(asset, assetType) {
   }
 }
 
+function handleSelectUploadFile(event) {
+  selectedUploadFile.value = event.target.files?.[0] || null
+}
+
+async function handleUploadAsset() {
+  error.value = ''
+  uploadMessage.value = ''
+
+  if (!selectedProject.value || !selectedUploadFile.value) {
+    uploadMessage.value = '请先选择项目和素材文件。'
+    return
+  }
+
+  isUploadingAsset.value = true
+
+  try {
+    const uploaded = await uploadProjectAsset(
+      selectedProject.value.id,
+      uploadAssetType.value,
+      selectedUploadFile.value
+    )
+    await createProjectAsset(selectedProject.value.id, {
+      asset_type: uploaded.asset_type,
+      name: uploaded.name,
+      path: uploaded.path
+    })
+    const assetPayload = await listProjectAssets(selectedProject.value.id)
+    projectAssets.value = assetPayload.assets || []
+    uploadMessage.value = '素材上传成功。'
+  } catch (err) {
+    uploadMessage.value = err instanceof Error ? err.message : '素材上传失败'
+  } finally {
+    isUploadingAsset.value = false
+  }
+}
+
 function findUpdatedSelectedShot(currentShots) {
   if (!selectedShot.value) {
     return currentShots[0] || null
@@ -573,6 +649,20 @@ function buildValidationReport(currentShots) {
 .video-workbench__asset-library h2,
 .video-workbench__asset-library h3 {
   margin: 0;
+}
+
+.video-workbench__asset-upload {
+  display: grid;
+  grid-template-columns: minmax(140px, 180px) minmax(180px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-top: 16px;
+}
+
+.video-workbench__upload-message {
+  margin: 12px 0 0;
+  color: #047857;
+  font-weight: 700;
 }
 
 .video-workbench__asset-groups {
