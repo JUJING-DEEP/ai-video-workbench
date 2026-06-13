@@ -5,15 +5,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import VideoWorkbench from '../VideoWorkbench.vue'
 import {
   bindShotAsset,
+  createProjectAsset,
   getProjectShots,
   listProjectAssets,
-  listProjects
+  listProjects,
+  uploadProjectAsset
 } from '../../services/videoWorkbenchApi'
 
 vi.mock('../../services/videoWorkbenchApi', () => ({
   bindShotAsset: vi.fn().mockResolvedValue({ shot: {} }),
   createProject: vi.fn(),
-  createProjectAsset: vi.fn(),
+  createProjectAsset: vi.fn().mockResolvedValue({ asset: {} }),
   getProjectShots: vi.fn().mockResolvedValue({
     shots: [
       {
@@ -63,7 +65,12 @@ vi.mock('../../services/videoWorkbenchApi', () => ({
       }
     ]
   }),
-  parseStoryboard: vi.fn()
+  parseStoryboard: vi.fn(),
+  uploadProjectAsset: vi.fn().mockResolvedValue({
+    name: 'uploaded.png',
+    path: 'data/uploads/7/uploaded.png',
+    asset_type: 'image'
+  })
 }))
 
 async function flushPromises() {
@@ -187,5 +194,55 @@ describe('VideoWorkbench', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-testid="bind-library-asset-11-image"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('uploads a local asset and creates an asset library entry', async () => {
+    const wrapper = mount(VideoWorkbench)
+    await flushPromises()
+
+    await wrapper.find('#project-select').setValue('7')
+    await flushPromises()
+
+    await wrapper.find('#asset-library-upload-type').setValue('image')
+    const file = new File(['image-bytes'], 'uploaded.png', { type: 'image/png' })
+    const fileInput = wrapper.find('#asset-library-upload-file')
+    Object.defineProperty(fileInput.element, 'files', {
+      value: [file],
+      configurable: true
+    })
+    await fileInput.trigger('change')
+    await wrapper.find('[data-testid="upload-library-asset"]').trigger('click')
+    await flushPromises()
+
+    expect(uploadProjectAsset).toHaveBeenCalledWith(7, 'image', file)
+    expect(createProjectAsset).toHaveBeenCalledWith(7, {
+      asset_type: 'image',
+      name: 'uploaded.png',
+      path: 'data/uploads/7/uploaded.png'
+    })
+    expect(listProjectAssets).toHaveBeenCalledWith(7)
+    expect(wrapper.text()).toContain('素材上传成功。')
+  })
+
+  it('shows an upload failure message', async () => {
+    uploadProjectAsset.mockRejectedValueOnce(new Error('Upload failed'))
+
+    const wrapper = mount(VideoWorkbench)
+    await flushPromises()
+
+    await wrapper.find('#project-select').setValue('7')
+    await flushPromises()
+
+    const file = new File(['video-bytes'], 'bad.mp4', { type: 'video/mp4' })
+    const fileInput = wrapper.find('#asset-library-upload-file')
+    Object.defineProperty(fileInput.element, 'files', {
+      value: [file],
+      configurable: true
+    })
+    await fileInput.trigger('change')
+    await wrapper.find('[data-testid="upload-library-asset"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Upload failed')
   })
 })
