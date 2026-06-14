@@ -117,3 +117,10 @@ export function generateProjectImage(projectId, prompt) {
     body: JSON.stringify({ prompt })
   })
 }
+
+export function generateKeyframe(projectId, shotId, prompt) {
+  return request(`/api/video-workbench/projects/${projectId}/shots/${shotId}/generate-keyframe`, {
+    method: 'POST',
+    body: JSON.stringify({ prompt })
+  })
+}

@@ -6,6 +6,7 @@ import VideoWorkbench from '../VideoWorkbench.vue'
 import {
   bindShotAsset,
   createProjectAsset,
+  generateKeyframe,
   generateProjectImage,
   getNanoBananaProviderSettings,
   getProjectShots,
@@ -19,6 +20,12 @@ vi.mock('../../services/videoWorkbenchApi', () => ({
   bindShotAsset: vi.fn().mockResolvedValue({ shot: {} }),
   createProject: vi.fn(),
   createProjectAsset: vi.fn().mockResolvedValue({ asset: {} }),
+  generateKeyframe: vi.fn().mockResolvedValue({
+    asset_id: 31,
+    shot_id: 1,
+    path: 'data/uploads/7/generated/keyframes/nano-banana-keyframe.png',
+    asset_type: 'keyframe'
+  }),
   generateProjectImage: vi.fn().mockResolvedValue({
     asset_id: 21,
     image_path: 'data/uploads/7/generated/nano-banana.png',
@@ -68,6 +75,8 @@ vi.mock('../../services/videoWorkbenchApi', () => ({
         asset_type: 'keyframe',
         name: 'Hook Keyframe',
         path: '/library/hook-keyframe.png',
+        source: 'manual',
+        prompt: '',
         created_at: '2026-06-13 12:01:00'
       },
       {
@@ -315,5 +324,120 @@ describe('VideoWorkbench', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Provider error')
+  })
+
+  it('renders the keyframe generator panel', async () => {
+    const wrapper = mount(VideoWorkbench)
+    await flushPromises()
+
+    await wrapper.find('#project-select').setValue('7')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('AI Keyframe Generator')
+    expect(wrapper.find('#keyframe-prompt').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="generate-keyframe"]').exists()).toBe(true)
+  })
+
+  it('disables keyframe generation when no shot is selected', async () => {
+    getProjectShots.mockResolvedValueOnce({ shots: [] })
+
+    const wrapper = mount(VideoWorkbench)
+    await flushPromises()
+
+    await wrapper.find('#project-select').setValue('7')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="generate-keyframe"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('请先选择一个 Shot。')
+  })
+
+  it('calls generateKeyframe with the selected shot and prompt', async () => {
+    const wrapper = mount(VideoWorkbench)
+    await flushPromises()
+
+    await wrapper.find('#project-select').setValue('7')
+    await flushPromises()
+
+    await wrapper.find('#keyframe-prompt').setValue('Draw a keyframe.')
+    await wrapper.find('[data-testid="generate-keyframe"]').trigger('click')
+    await flushPromises()
+
+    expect(generateKeyframe).toHaveBeenCalledWith(7, 1, 'Draw a keyframe.')
+  })
+
+  it('shows keyframe generation loading state', async () => {
+    let resolveGenerate
+    generateKeyframe.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveGenerate = resolve
+      })
+    )
+
+    const wrapper = mount(VideoWorkbench)
+    await flushPromises()
+
+    await wrapper.find('#project-select').setValue('7')
+    await flushPromises()
+
+    await wrapper.find('#keyframe-prompt').setValue('Draw a keyframe.')
+    await wrapper.find('[data-testid="generate-keyframe"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Generating keyframe...')
+
+    resolveGenerate({
+      asset_id: 31,
+      shot_id: 1,
+      path: 'data/uploads/7/generated/keyframes/nano-banana-keyframe.png',
+      asset_type: 'keyframe'
+    })
+    await flushPromises()
+  })
+
+  it('shows a keyframe generation success message and preview', async () => {
+    const wrapper = mount(VideoWorkbench)
+    await flushPromises()
+
+    await wrapper.find('#project-select').setValue('7')
+    await flushPromises()
+
+    await wrapper.find('#keyframe-prompt').setValue('Draw a keyframe.')
+    await wrapper.find('[data-testid="generate-keyframe"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Keyframe generated.')
+    expect(wrapper.find('img[alt="关键帧预览"]').attributes('src')).toBe(
+      'data/uploads/7/generated/keyframes/nano-banana-keyframe.png'
+    )
+  })
+
+  it('refreshes the asset library after keyframe generation', async () => {
+    const wrapper = mount(VideoWorkbench)
+    await flushPromises()
+
+    await wrapper.find('#project-select').setValue('7')
+    await flushPromises()
+
+    await wrapper.find('#keyframe-prompt').setValue('Draw a keyframe.')
+    await wrapper.find('[data-testid="generate-keyframe"]').trigger('click')
+    await flushPromises()
+
+    expect(listProjectAssets).toHaveBeenCalledWith(7)
+  })
+
+  it('shows keyframe generation errors', async () => {
+    generateKeyframe.mockRejectedValueOnce(new Error('Invalid Nano Banana API key.'))
+
+    const wrapper = mount(VideoWorkbench)
+    await flushPromises()
+
+    await wrapper.find('#project-select').setValue('7')
+    await flushPromises()
+
+    await wrapper.find('#keyframe-prompt').setValue('Draw a keyframe.')
+    await wrapper.find('[data-testid="generate-keyframe"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Invalid Nano Banana API key.')
   })
 })

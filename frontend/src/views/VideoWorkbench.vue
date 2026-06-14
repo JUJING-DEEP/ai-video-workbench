@@ -133,6 +133,31 @@
           </p>
         </section>
 
+        <section class="video-workbench__ai-generator" aria-label="AI Keyframe Generator">
+          <div>
+            <p class="video-workbench__eyebrow">AI Keyframe Generator</p>
+            <h3>Shot keyframe</h3>
+          </div>
+          <p v-if="!selectedShot" class="video-workbench__muted">请先选择一个 Shot。</p>
+          <textarea
+            id="keyframe-prompt"
+            v-model="keyframePrompt"
+            aria-label="Keyframe prompt"
+            placeholder="Describe the keyframe to generate..."
+          ></textarea>
+          <button
+            type="button"
+            data-testid="generate-keyframe"
+            :disabled="isGeneratingKeyframe || !selectedProject || !selectedShot"
+            @click="handleGenerateKeyframe"
+          >
+            {{ isGeneratingKeyframe ? 'Generating keyframe...' : 'Generate Keyframe' }}
+          </button>
+          <p v-if="keyframeMessage" class="video-workbench__upload-message">
+            {{ keyframeMessage }}
+          </p>
+        </section>
+
         <div class="video-workbench__asset-groups">
           <section
             v-for="group in assetLibraryGroups"
@@ -151,6 +176,8 @@
                 <span>{{ asset.asset_type }}</span>
               </div>
               <p>{{ asset.path }}</p>
+              <small>source: {{ asset.source || 'manual' }}</small>
+              <small v-if="asset.prompt">prompt: {{ asset.prompt }}</small>
               <small>{{ canPreviewAsset(asset) ? '可预览' : '不可预览' }}</small>
               <div class="video-workbench__asset-actions">
                 <button
@@ -273,6 +300,7 @@ import {
   bindShotAsset,
   createProjectAsset,
   createProject,
+  generateKeyframe,
   generateProjectImage,
   getNanoBananaProviderSettings,
   getProjectShots,
@@ -309,6 +337,9 @@ const isSavingProviderSettings = ref(false)
 const nanoBananaPrompt = ref('')
 const isGeneratingImage = ref(false)
 const generationMessage = ref('')
+const keyframePrompt = ref('')
+const isGeneratingKeyframe = ref(false)
+const keyframeMessage = ref('')
 
 const assetFields = [
   { type: 'image', label: '图片', placeholder: '/path/to/shot-001.png', accept: 'image/*' },
@@ -628,6 +659,37 @@ async function handleGenerateImage() {
   }
 }
 
+async function handleGenerateKeyframe() {
+  keyframeMessage.value = ''
+
+  if (!selectedProject.value || !selectedShot.value) {
+    keyframeMessage.value = '请先选择一个 Shot。'
+    return
+  }
+
+  const prompt = keyframePrompt.value.trim()
+  if (!prompt) {
+    keyframeMessage.value = '请输入关键帧提示词。'
+    return
+  }
+
+  isGeneratingKeyframe.value = true
+
+  try {
+    const result = await generateKeyframe(selectedProject.value.id, selectedShot.value.shot_id, prompt)
+    await loadProjectShots(selectedProject.value.id)
+    assetPreviews.value.keyframe = {
+      url: result.path,
+      kind: 'image'
+    }
+    keyframeMessage.value = 'Keyframe generated.'
+  } catch (err) {
+    keyframeMessage.value = err instanceof Error ? err.message : '关键帧生成失败'
+  } finally {
+    isGeneratingKeyframe.value = false
+  }
+}
+
 function findUpdatedSelectedShot(currentShots) {
   if (!selectedShot.value) {
     return currentShots[0] || null
@@ -644,6 +706,15 @@ function syncAssetPaths() {
     image: selectedShot.value?.image_path || '',
     keyframe: selectedShot.value?.keyframe_path || '',
     video: selectedShot.value?.video_path || ''
+  }
+  assetPreviews.value = {
+    image: selectedShot.value?.image_path
+      ? { url: selectedShot.value.image_path, kind: 'image' }
+      : null,
+    keyframe: selectedShot.value?.keyframe_path
+      ? { url: selectedShot.value.keyframe_path, kind: 'image' }
+      : null,
+    video: selectedShot.value?.video_path ? { url: selectedShot.value.video_path, kind: 'video' } : null
   }
 }
 

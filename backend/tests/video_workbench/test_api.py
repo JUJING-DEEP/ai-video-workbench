@@ -490,3 +490,246 @@ def test_generate_image_returns_provider_error(client):
 
     assert response.status_code == 502
     assert "provider" in response.json()["detail"].lower()
+
+
+def test_generate_keyframe_success(client):
+    client.app.dependency_overrides[get_nano_banana_client] = lambda: SuccessfulNanoBananaClient()
+    client.put(
+        "/api/video-workbench/provider-settings/nano-banana",
+        json={
+            "nano_banana_api_key": "test-key",
+            "nano_banana_base_url": "https://nano.example/generate",
+        },
+    )
+    project_id = client.post(
+        "/api/video-workbench/projects",
+        json={"title": "Generated Keyframe"},
+    ).json()["project"]["id"]
+    client.post(
+        f"/api/video-workbench/projects/{project_id}/storyboard",
+        json={"text": STORYBOARD_TEXT},
+    )
+
+    response = client.post(
+        f"/api/video-workbench/projects/{project_id}/shots/1/generate-keyframe",
+        json={"prompt": "Draw a keyframe."},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["asset_type"] == "keyframe"
+    assert payload["shot_id"] == 1
+    assert payload["asset_id"] == 1
+    assert payload["path"].startswith(f"data/uploads/{project_id}/generated/keyframes/")
+    assert Path(payload["path"]).read_bytes() == b"generated-image"
+
+
+def test_generate_keyframe_empty_prompt(client):
+    project_id = client.post(
+        "/api/video-workbench/projects",
+        json={"title": "Missing Keyframe Prompt"},
+    ).json()["project"]["id"]
+    client.post(
+        f"/api/video-workbench/projects/{project_id}/storyboard",
+        json={"text": STORYBOARD_TEXT},
+    )
+
+    response = client.post(
+        f"/api/video-workbench/projects/{project_id}/shots/1/generate-keyframe",
+        json={"prompt": "   "},
+    )
+
+    assert response.status_code == 400
+    assert "prompt" in response.json()["detail"].lower()
+
+
+def test_generate_keyframe_unknown_project(client):
+    response = client.post(
+        "/api/video-workbench/projects/999/shots/1/generate-keyframe",
+        json={"prompt": "Draw a keyframe."},
+    )
+
+    assert response.status_code == 404
+    assert "project" in response.json()["detail"].lower()
+
+
+def test_generate_keyframe_unknown_shot(client):
+    client.put(
+        "/api/video-workbench/provider-settings/nano-banana",
+        json={
+            "nano_banana_api_key": "test-key",
+            "nano_banana_base_url": "https://nano.example/generate",
+        },
+    )
+    project_id = client.post(
+        "/api/video-workbench/projects",
+        json={"title": "Missing Keyframe Shot"},
+    ).json()["project"]["id"]
+    client.post(
+        f"/api/video-workbench/projects/{project_id}/storyboard",
+        json={"text": STORYBOARD_TEXT},
+    )
+
+    response = client.post(
+        f"/api/video-workbench/projects/{project_id}/shots/999/generate-keyframe",
+        json={"prompt": "Draw a keyframe."},
+    )
+
+    assert response.status_code == 404
+    assert "shot" in response.json()["detail"].lower()
+
+
+def test_generate_keyframe_missing_provider_settings(client):
+    project_id = client.post(
+        "/api/video-workbench/projects",
+        json={"title": "Missing Provider Settings"},
+    ).json()["project"]["id"]
+    client.post(
+        f"/api/video-workbench/projects/{project_id}/storyboard",
+        json={"text": STORYBOARD_TEXT},
+    )
+
+    response = client.post(
+        f"/api/video-workbench/projects/{project_id}/shots/1/generate-keyframe",
+        json={"prompt": "Draw a keyframe."},
+    )
+
+    assert response.status_code == 400
+    assert "provider settings" in response.json()["detail"].lower()
+
+
+def test_generate_keyframe_creates_keyframe_asset(client):
+    client.app.dependency_overrides[get_nano_banana_client] = lambda: SuccessfulNanoBananaClient()
+    client.put(
+        "/api/video-workbench/provider-settings/nano-banana",
+        json={
+            "nano_banana_api_key": "test-key",
+            "nano_banana_base_url": "https://nano.example/generate",
+        },
+    )
+    project_id = client.post(
+        "/api/video-workbench/projects",
+        json={"title": "Keyframe Asset"},
+    ).json()["project"]["id"]
+    client.post(
+        f"/api/video-workbench/projects/{project_id}/storyboard",
+        json={"text": STORYBOARD_TEXT},
+    )
+
+    client.post(
+        f"/api/video-workbench/projects/{project_id}/shots/1/generate-keyframe",
+        json={"prompt": "Draw a keyframe."},
+    )
+
+    assets = client.get(f"/api/video-workbench/projects/{project_id}/assets").json()["assets"]
+    assert assets[0]["asset_type"] == "keyframe"
+    assert assets[0]["source"] == "nano_banana"
+    assert assets[0]["prompt"] == "Draw a keyframe."
+
+
+def test_generate_keyframe_binds_to_shot(client):
+    client.app.dependency_overrides[get_nano_banana_client] = lambda: SuccessfulNanoBananaClient()
+    client.put(
+        "/api/video-workbench/provider-settings/nano-banana",
+        json={
+            "nano_banana_api_key": "test-key",
+            "nano_banana_base_url": "https://nano.example/generate",
+        },
+    )
+    project_id = client.post(
+        "/api/video-workbench/projects",
+        json={"title": "Bind Keyframe"},
+    ).json()["project"]["id"]
+    client.post(
+        f"/api/video-workbench/projects/{project_id}/storyboard",
+        json={"text": STORYBOARD_TEXT},
+    )
+
+    payload = client.post(
+        f"/api/video-workbench/projects/{project_id}/shots/1/generate-keyframe",
+        json={"prompt": "Draw a keyframe."},
+    ).json()
+
+    shot = client.get(f"/api/video-workbench/projects/{project_id}/shots").json()["shots"][0]
+    assert shot["keyframe_path"] == payload["path"]
+
+
+def test_generate_keyframe_invalid_provider_key(client):
+    client.app.dependency_overrides[get_nano_banana_client] = lambda: InvalidKeyNanoBananaClient()
+    client.put(
+        "/api/video-workbench/provider-settings/nano-banana",
+        json={
+            "nano_banana_api_key": "bad-key",
+            "nano_banana_base_url": "https://nano.example/generate",
+        },
+    )
+    project_id = client.post(
+        "/api/video-workbench/projects",
+        json={"title": "Keyframe Invalid Key"},
+    ).json()["project"]["id"]
+    client.post(
+        f"/api/video-workbench/projects/{project_id}/storyboard",
+        json={"text": STORYBOARD_TEXT},
+    )
+
+    response = client.post(
+        f"/api/video-workbench/projects/{project_id}/shots/1/generate-keyframe",
+        json={"prompt": "Draw a keyframe."},
+    )
+
+    assert response.status_code == 401
+    assert "invalid" in response.json()["detail"].lower()
+
+
+def test_generate_keyframe_provider_timeout(client):
+    client.app.dependency_overrides[get_nano_banana_client] = lambda: TimeoutNanoBananaClient()
+    client.put(
+        "/api/video-workbench/provider-settings/nano-banana",
+        json={
+            "nano_banana_api_key": "test-key",
+            "nano_banana_base_url": "https://nano.example/generate",
+        },
+    )
+    project_id = client.post(
+        "/api/video-workbench/projects",
+        json={"title": "Keyframe Timeout"},
+    ).json()["project"]["id"]
+    client.post(
+        f"/api/video-workbench/projects/{project_id}/storyboard",
+        json={"text": STORYBOARD_TEXT},
+    )
+
+    response = client.post(
+        f"/api/video-workbench/projects/{project_id}/shots/1/generate-keyframe",
+        json={"prompt": "Draw a keyframe."},
+    )
+
+    assert response.status_code == 504
+    assert "timeout" in response.json()["detail"].lower()
+
+
+def test_generate_keyframe_provider_error(client):
+    client.app.dependency_overrides[get_nano_banana_client] = lambda: ProviderErrorNanoBananaClient()
+    client.put(
+        "/api/video-workbench/provider-settings/nano-banana",
+        json={
+            "nano_banana_api_key": "test-key",
+            "nano_banana_base_url": "https://nano.example/generate",
+        },
+    )
+    project_id = client.post(
+        "/api/video-workbench/projects",
+        json={"title": "Keyframe Provider Error"},
+    ).json()["project"]["id"]
+    client.post(
+        f"/api/video-workbench/projects/{project_id}/storyboard",
+        json={"text": STORYBOARD_TEXT},
+    )
+
+    response = client.post(
+        f"/api/video-workbench/projects/{project_id}/shots/1/generate-keyframe",
+        json={"prompt": "Draw a keyframe."},
+    )
+
+    assert response.status_code == 502
+    assert "provider" in response.json()["detail"].lower()
