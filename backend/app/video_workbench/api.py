@@ -312,6 +312,64 @@ async def generate_project_image(
     )
 
 
+@router.post("/projects/{project_id}/shots/{shot_id}/generate-keyframe")
+async def generate_shot_keyframe(
+    project_id: int,
+    shot_id: int,
+    data: GenerateImageRequest,
+    repository: VideoWorkbenchRepository = Depends(get_repository),
+    nano_banana_client: NanoBananaClient = Depends(get_nano_banana_client),
+):
+    prompt = data.prompt.strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt is required.")
+
+    try:
+        repository.get_project(project_id)
+        shots = repository.get_project_shots(project_id)
+        next(shot for shot in shots if shot.shot_id == shot_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except StopIteration as exc:
+        raise HTTPException(status_code=404, detail=f"Shot not found: {project_id}/{shot_id}") from exc
+
+    settings = repository.get_provider_settings("nano_banana")
+    api_key = settings["api_key"].strip()
+    base_url = settings["base_url"].strip()
+    if not api_key or not base_url:
+        raise HTTPException(status_code=400, detail="Nano Banana provider settings are required.")
+
+    try:
+        image_bytes = nano_banana_client.generate_image(prompt, api_key, base_url)
+    except NanoBananaError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    generated_dir = Path("data") / "uploads" / str(project_id) / "generated" / "keyframes"
+    generated_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"nano-banana-keyframe-{abs(hash(prompt))}.png"
+    image_path = generated_dir / filename
+    image_path.write_bytes(image_bytes)
+
+    asset = repository.create_asset(
+        project_id,
+        asset_type="keyframe",
+        name=filename,
+        path=image_path.as_posix(),
+        source="nano_banana",
+        prompt=prompt,
+    )
+    repository.bind_asset(project_id, shot_id, "keyframe", asset["path"])
+
+    return jsonable_encoder(
+        {
+            "asset_id": asset["id"],
+            "shot_id": shot_id,
+            "path": asset["path"],
+            "asset_type": "keyframe",
+        }
+    )
+
+
 @router.post("/projects/{project_id}/upload")
 async def upload_project_asset(
     project_id: int,
