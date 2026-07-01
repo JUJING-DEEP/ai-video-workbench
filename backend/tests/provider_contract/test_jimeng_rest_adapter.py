@@ -1,6 +1,8 @@
 import pytest
+from datetime import datetime, timezone
 
 from app.video_workbench.providers.jimeng_rest_provider import (
+    JimengRestSubmitClient,
     build_poll_request,
     build_submit_request,
     map_provider_status,
@@ -8,7 +10,7 @@ from app.video_workbench.providers.jimeng_rest_provider import (
     parse_submit_response,
     validate_video_url,
 )
-from app.video_workbench.video_provider import VideoProviderError
+from app.video_workbench.video_provider import VideoProviderError, VideoProviderTimeoutError
 
 
 SETTINGS = {
@@ -20,6 +22,24 @@ SETTINGS = {
     "access_key": "ak-test",
     "secret_key": "sk-test",
 }
+FIXED_TIME = datetime(2026, 6, 30, 12, 34, 56, tzinfo=timezone.utc)
+
+
+class FakeSubmitTransport:
+    def __init__(self, payload=None, error=None):
+        self.payload = payload or {
+            "code": 10000,
+            "message": "Success",
+            "data": {"task_id": "7392616336519610409"},
+        }
+        self.error = error
+        self.calls = []
+
+    def post_json(self, request, body_json, timeout_seconds):
+        self.calls.append((request, body_json, timeout_seconds))
+        if self.error == "timeout":
+            raise TimeoutError("submit timed out")
+        return self.payload
 
 
 def test_submit_request_includes_official_action_version_and_req_key():
@@ -50,6 +70,92 @@ def test_submit_response_parses_task_id():
     )
 
     assert task_id == "7392616336519610409"
+
+
+def test_real_submit_client_signs_request_and_returns_task_id():
+    transport = FakeSubmitTransport()
+    client = JimengRestSubmitClient(
+        transport=transport,
+        request_datetime=FIXED_TIME,
+    )
+
+    task_id = client.submit_job(
+        "https://assets.example/keyframe.png",
+        {
+            **SETTINGS,
+            "prompt": "camera slowly pushes in",
+        },
+    )
+
+    assert task_id == "7392616336519610409"
+    assert len(transport.calls) == 1
+    request, body_json, timeout_seconds = transport.calls[0]
+    assert timeout_seconds == 10
+    assert request.query == {
+        "Action": "CVSync2AsyncSubmitTask",
+        "Version": "2022-08-31",
+    }
+    assert request.body["req_key"] == "jimeng_ti2v_v30_pro"
+    assert request.body["image_urls"] == ["https://assets.example/keyframe.png"]
+    assert request.body["prompt"] == "camera slowly pushes in"
+    assert '"req_key":"jimeng_ti2v_v30_pro"' in body_json
+    assert request.headers["Host"] == "visual.volcengineapi.com"
+    assert request.headers["X-Date"] == "20260630T123456Z"
+    assert request.headers["Authorization"].startswith(
+        "HMAC-SHA256 Credential=ak-test/20260630/cn-north-1/cv/request"
+    )
+
+
+def test_real_submit_client_maps_provider_error_response():
+    client = JimengRestSubmitClient(
+        transport=FakeSubmitTransport({"code": 50412, "message": "input text failed"}),
+        request_datetime=FIXED_TIME,
+    )
+
+    with pytest.raises(VideoProviderError, match="input text failed"):
+        client.submit_job(
+            "https://assets.example/keyframe.png",
+            {
+                **SETTINGS,
+                "prompt": "blocked prompt",
+            },
+        )
+
+
+def test_real_submit_client_maps_transport_timeout():
+    client = JimengRestSubmitClient(
+        transport=FakeSubmitTransport(error="timeout"),
+        request_datetime=FIXED_TIME,
+    )
+
+    with pytest.raises(VideoProviderTimeoutError, match="Jimeng submit request timeout"):
+        client.submit_job(
+            "https://assets.example/keyframe.png",
+            {
+                **SETTINGS,
+                "prompt": "camera slowly pushes in",
+            },
+        )
+
+
+def test_real_submit_client_rejects_missing_credentials_before_transport_call():
+    transport = FakeSubmitTransport()
+    client = JimengRestSubmitClient(
+        transport=transport,
+        request_datetime=FIXED_TIME,
+    )
+
+    with pytest.raises(VideoProviderError, match="credentials"):
+        client.submit_job(
+            "https://assets.example/keyframe.png",
+            {
+                **SETTINGS,
+                "access_key": "",
+                "prompt": "camera slowly pushes in",
+            },
+        )
+
+    assert transport.calls == []
 
 
 def test_invalid_submit_response_returns_provider_error():
