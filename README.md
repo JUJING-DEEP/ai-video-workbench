@@ -69,7 +69,13 @@ v1.0.0-beta.2 聚焦稳定的本地工作台基础能力：解析固定格式分
 
 - [v1.1 Roadmap](docs/roadmap/v1.1-roadmap.md)
 - [Jimeng Provider Contract](docs/providers/jimeng-provider-contract.md)
+- [Volcengine V4 Signing](docs/providers/volcengine-v4-signing.md)
 - [v1.1 Release Gates](docs/releases/v1.1-release-gates.md)
+
+v1.1 Jimeng REST work is being integrated in small, reviewable slices. The
+current production-facing slice provides a signed submit client with fake
+transport tests; real Jimeng submit, poll, download, and provider enablement
+remain opt-in follow-up work.
 
 ---
 

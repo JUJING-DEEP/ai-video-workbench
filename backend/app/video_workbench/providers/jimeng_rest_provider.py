@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from datetime import datetime
 from urllib.parse import urlparse
 
 from ..video_provider import VideoProviderError, VideoProviderTimeoutError
+from .volcengine_v4_signer import sign_request
 
 DEFAULT_ENDPOINT = "https://visual.volcengineapi.com"
 DEFAULT_REGION = "cn-north-1"
@@ -33,6 +36,11 @@ class JimengRestRequest:
     signing_required: bool = True
 
 
+class JimengRestSubmitTransport:
+    def post_json(self, request: JimengRestRequest, body_json: str, timeout_seconds: int) -> dict:
+        raise NotImplementedError("Jimeng REST submit transport is not configured.")
+
+
 def _setting(settings: dict, key: str, default: str) -> str:
     value = str(settings.get(key, "")).strip()
     return value or default
@@ -46,6 +54,21 @@ def _rest_config(settings: dict) -> dict:
         "version": _setting(settings, "version", DEFAULT_VERSION),
         "req_key": _setting(settings, "req_key", DEFAULT_REQ_KEY),
     }
+
+
+def _optional_setting(settings: dict, key: str) -> str:
+    return str(settings.get(key, "")).strip()
+
+
+def _json_body(body: dict) -> str:
+    return json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+
+
+def _endpoint_host(endpoint: str) -> str:
+    parsed = urlparse(endpoint)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise VideoProviderError("Invalid Jimeng endpoint URL.")
+    return parsed.netloc
 
 
 def _build_request(settings: dict, action: str, body: dict) -> JimengRestRequest:
@@ -98,6 +121,67 @@ def parse_submit_response(payload: dict) -> str:
     if not str(task_id).strip():
         raise VideoProviderError("Invalid Jimeng submit response: missing task_id.")
     return str(task_id).strip()
+
+
+class JimengRestSubmitClient:
+    def __init__(
+        self,
+        transport: JimengRestSubmitTransport | None = None,
+        request_datetime: datetime | None = None,
+        timeout_seconds: int = 10,
+    ):
+        self.transport = transport
+        self.request_datetime = request_datetime
+        self.timeout_seconds = timeout_seconds
+
+    def submit_job(self, keyframe_path: str, settings: dict) -> str:
+        if self.transport is None:
+            raise VideoProviderError("Jimeng REST submit transport is not configured.")
+
+        access_key = _optional_setting(settings, "access_key")
+        secret_key = _optional_setting(settings, "secret_key")
+        if not access_key or not secret_key:
+            raise VideoProviderError("Jimeng REST credentials are required for submit.")
+
+        prompt = _optional_setting(settings, "prompt")
+        if not prompt:
+            raise VideoProviderError("Jimeng REST submit prompt is required.")
+
+        request = build_submit_request(
+            keyframe_url=keyframe_path,
+            prompt=prompt,
+            settings=settings,
+        )
+        body_json = _json_body(request.body)
+        signed = sign_request(
+            method=request.method,
+            path="/",
+            query=request.query,
+            headers={
+                **request.headers,
+                "Host": _endpoint_host(request.endpoint),
+            },
+            payload=body_json,
+            access_key=access_key,
+            secret_key=secret_key,
+            region=request.region,
+            service=request.service,
+            request_datetime=self.request_datetime,
+        )
+        request.headers = signed.headers
+
+        try:
+            payload = self.transport.post_json(request, body_json, self.timeout_seconds)
+        except TimeoutError as exc:
+            raise VideoProviderTimeoutError("Jimeng submit request timeout.") from exc
+        except VideoProviderTimeoutError:
+            raise
+        except VideoProviderError:
+            raise
+        except Exception as exc:
+            raise VideoProviderError(f"Jimeng submit request failed: {exc}") from exc
+
+        return parse_submit_response(payload)
 
 
 def build_poll_request(task_id: str, settings: dict) -> JimengRestRequest:

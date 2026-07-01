@@ -13,6 +13,22 @@ render-plan readiness.
 It does not connect to the real Volcano Engine Jimeng API in `v1.0.0`.
 `v1.1` must harden the provider contract before any real integration work.
 
+## v1.1 Submit Integration Boundary
+
+The first production integration slice adds a signed Jimeng REST submit client
+behind an injectable HTTP transport. This client can:
+
+- Build the official `CVSync2AsyncSubmitTask` request.
+- Sign the submit request with the reusable Volcengine V4 signer.
+- Send the signed request through a caller-provided transport.
+- Parse the official `data.task_id` submit response.
+- Map submit provider errors and transport timeouts to local provider errors.
+
+This does not make the real Jimeng API the default runtime path. The default
+Workbench workflow continues to use deterministic fake clients until a later
+Provider Integration PR explicitly wires the signed submit, poll, and download
+lifecycles together.
+
 ## Mock Provider And Real Provider Boundary
 
 The mock provider is responsible for deterministic local behavior:
